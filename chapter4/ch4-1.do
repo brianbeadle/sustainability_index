@@ -7,19 +7,18 @@ cd C:/Users/Beadle/Documents/GitHub/paper3-organic_farming/stata  // office
 ********************************************************************************
 * importing and merging data
 ********************************************************************************
-/*
+
 import delimited raw/asi-ord4-long.csv, clear 
 rename id idn
-rename asi zasi4
-lab var zasi4 "ASI score"
+rename asi asi4
 rename year YEAR
 
 merge m:m idn YEAR using dat/000-basic_indicators_papers2-3.dta
 keep if _merge == 3
 drop _merge 
 
-save dat/unnecessary_intermediate.dta, replace // stata in my office is a bummer
-*/
+* there was an issue with stata in my office; creating an unnecessary temp file
+save dat/unnecessary_intermediate.dta, replace
 
 *****************************
 * defining the organic groups
@@ -82,12 +81,14 @@ tsset idn year
 bysort idn (year): gen time = cond((org1 == 2 & L1.org1 == 1), ///
 year, .) if switch == 1 // first year farm is partial after conv
 replace time = YEAR if time != .
-tab time  // we now have 51 farms with a full correct transition
+tab time  // checking sample size with a full correct transition
 bysort idn (year): egen treat = min(time)  // expands t=0 to all obs/farm
 replace treat = 0 if treat == .  // so there are no missing obs
 
 * ALL REMAINING OBS ARE EITHER QUITTERS OR W/O A TRANSITION, SO DROPPING
 drop if switch == 1 & treat == 0
+
+* sample sizes: total and starters
 distinct idn  				  // 64102 obs from 8170 farms
 distinct idn if switch == 1   // 429 obs from 49 farms with a treatment
 
@@ -156,45 +157,10 @@ lab define sizecat 6 "25,000 - <50,000" 7 "50,000 - <100,000"  ///
 	13 "1,500,000 - <3,000,000" 14 ">= 3,000,000"
 lab value A26 sizecat
 
-*ssc install corrtex
-
-*est clear
-
-*local vars profit solvency e_diverse pesticide ghg_emissions ///
-*land_quality paid_wage prov_employ productivity
-
-*corrtex `vars', file(results/corr_vars) replace longtable 
-
-*foreach var of varlist `vars' {
-*	tabstat `var', c(stat) stat(mean sd)
-*}
-
-*foreach var of varlist `vars' {
-*	xtreg `var' i.org i.TF8 i.A26, vce(robust)
-*	est store `var'
-*}
-
-*esttab _all using results/var_regressions.tex, replace ///
-*b(3) se(3) label star(* 0.10 ** 0.05 *** 0.01) ///
-*booktabs longtable
-
-*foreach var of varlist `vars' {
-*	hist `var', percent lcolor(black) color(gray)
-*	graph save results/hist-`var'.gph, replace
-*}
-
-*graph combine results/hist-profit.gph results/hist-solvency.gph  ///
-*	results/hist-e_diverse.gph results/hist-pesticide.gph ///
-*	results/hist-ghg_emissions.gph results/hist-land_quality.gph ///
-*	results/hist-paid_wage.gph results/hist-prov_employ.gph ///
-*	results/hist-productivity.gph  ///
-*	ysize(11) xsize(8) title("Sustainability variables")
-*graph export results/hist-combine.pdf, as(pdf) replace
-
 *******************************
 * descriptive stats and visuals
 *******************************
-/* checking representativeness of the sample
+* checking representativeness of the sample
 merge m:m idn YEAR using "C:\asci\stata\dat\110-raw_indicators-panel.dta"
 keep if _merge==3
 drop _merge
@@ -219,16 +185,15 @@ replace eurostat_org = 5.76 if YEAR == 2012
 replace eurostat_org = 6.04 if YEAR == 2013 
 lab var eurostat_org "% UAA organic: actual"
 
-tsset idn YEAR
+tsset idn YEAR  
 tsline organicUAA eurostat_org, ///
 yscale(range(0 6)) ylabel(0(0.5)6) ///
 lcolor(black black) lpattern(solid dash) xtitle("Year") ytitle("% of total UAA") legend(pos(6) rows(1))
 graph export results/organicuaa_test.pdf, as(pdf) replace
 
 tsset idn year
-*/
 
-* hist of standardized asi 
+* hist of standardized asi (zasi4)
 hist zasi, percent lcolor(black) color(gray)
 graph export results/hist-zasi4.pdf, as(pdf) replace
 
@@ -284,10 +249,6 @@ asyvars legend(pos(6) rows(1)) xsize(9) ysize(7)
 graph save results/descstats_a26.gph, replace
 graph export results/descstats_a26.pdf, as(pdf) replace
 
-graph combine results/descstats_tf8.gph results/descstats_a26.gph, ///
-altshrink iscale(0.7) imargin(zero)
-graph export results/descstats_combine.pdf, as(pdf) replace
-
 * farm type
 levelsof TF8, local(tf8cat) 
 foreach z of local tf8cat {
@@ -303,7 +264,7 @@ foreach z of local a26cat {
 	pwmean zasi4 if A26 == `z' & YEAR == 2004, ///
 	over(org) mcompare(tukey) effects
 }
-xx
+
 save dat/asi_w-orgcat_reduced4.dta, replace
 
 **************************
@@ -361,36 +322,3 @@ graph combine results/csdid_plot_ny5.gph results/csdid_plot_ny6.gph  ///
 	results/csdid_plot_ny9.gph results/csdid_plot_ny10.gph,  ///
 	col(2) ysize(11) xsize(8) title("NYT control group")
 graph export results/csdid_plot_combine-ny.pdf, as(pdf) replace
-
-* did on individual vars
-lab var profit "Profitability"
-lab var solvency "Solvency"
-lab var e_diverse "Economic diversity"
-lab var pesticide "Expenditure on pesticides"
-lab var ghg_emissions "GHG emissions"
-lab var land_quality "Land ecosystem quality"
-lab var paid_wage "Wage ratio"
-lab var prov_employ "Provision of employment"
-lab var productivity "Multi-factor productivity"
-
-foreach var of varlist profit solvency e_diverse pesticide ///
-ghg_emissions land_quality paid_wage prov_employ productivity {
-csdid `var' i.TF8 i.A26, time(YEAR) gvar(treat) method(dripw)
-estat all
-estat event, estore(event_`var')
-
-local vtext: variable label `var' 
-if `"`vtext'"' == "" local vtext "`v'"
-
-event_plot event_`var', default_look together plottype(connected) ///
-graph_opt(xtitle("Number of time periods since organic transition") ///
-ytitle("ATT") title(`"`vtext'"') ///
-xlabel(-6(1)8)) stub_lag(Tp#) stub_lead(Tm#) 
-graph save results/csdid_plot-`var'.gph, replace
-graph export results/csdid_plot-`var'.pdf, as(pdf) replace
-
-esttab event_prod using results/event-`var'.tex, replace  ///
-b(3) ci(3) label star(* 0.10 ** 0.05 *** 0.01) ///
-booktabs alignment(D{.}{.}{-1}) longtable ///
-collabels("ATT") 
-}
