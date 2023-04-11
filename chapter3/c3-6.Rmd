@@ -1,0 +1,242 @@
+---
+title: |
+  | IRT model with covariates (splines)
+author: "Christoph Wunder"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_caption: yes
+    theme: spacelab
+    highlight: pygments
+    toc: yes
+    toc_depth: 4
+    number_sections: yes
+    # toc_float:
+    #   smooth_scroll: no
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+# bibliography: /Users/Christoph/Documents/Uni/Literatur/lit_DB/litdb_sp.bib
+# biblio-style: apalike
+# link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment=NA, message=FALSE, warning=FALSE)
+rm(list=ls())
+library(tidyverse)
+library(haven)
+library(brms)
+library(bayesplot)
+library(ggplot2)
+theme_set(theme_bw())
+library(tictoc)
+library(sampling)
+library(shinystan)
+```
+
+This file estimates the relationship between AS and energy and industrial using a non-parametric approach. A fixed effect of LFA is added.
+  
+# Data
+
+The data are prepared starting in line 155 of the dofile `200-nfc-v3.do`.
+
+```{r}
+d <- read_dta("../data/master.dta")
+d <- rename(d, id = idn)
+d$id <- as.integer(d$id)
+d$item <- as.factor(d$item)
+d$lfa <- as.factor(d$lfa)
+d$y <- factor( d$y, levels = c("0", "1", "2", "3"), ordered = TRUE ) 
+```
+
+Select subsample of data set:
+
+```{r, eval=FALSE, include=FALSE}
+# set.seed(647382)
+# n <- round(length(unique(d$id))*0.05, 0)
+# samplecluster <- cluster(d, clustername=c("id"), size = n, method="srswor")
+# d <- getdata(d, samplecluster)
+# glimpse(d, width = 60)
+```
+
+# Descriptive statistics 
+
+```{r}
+nrow(d)
+nrow(d)/9
+```
+
+```{r}
+summary(d)
+```
+
+```{r}
+ggplot( d, aes(x=y) ) +
+  stat_count(width = 0.5) +
+  xlab("") +
+  facet_wrap(~item)
+```
+
+# Fitting the 2PL ordinal model with unit-specific covariates (splines)
+
+The model with item-specific thresholds produces unreasonable estimates for the discrimination parameter. We decide to use the restricitve assumption of equally shaped and shifted thresholds to proceed with a discrimination parameter that seems to be essential for the model. 
+
+```{r, warning=FALSE, message=FALSE}
+tic("fit1")
+prior <-
+  # discrimination
+  prior("normal(0, 1)", class = "Intercept", dpar = "disc") +             # alpha
+  prior("normal(0, 1)", class = "sd", group = "item", dpar = "disc") +    # sigma_alpha
+  # unit-specific effects 
+  prior("constant(1)", class = "sd", group = "id") +
+  # item-specific effects 
+  prior("normal(0, 1)", class = "sd", coef = "Intercept", group = "item") +
+  # splines
+  prior("normal(0, 2)", class = "sds") +
+  # coefficients 
+  prior("normal(0, 1)", class = "b")
+
+formula <- brmsformula(
+  y ~ 1 + (1|i|item) + (1|id) + lfa +
+    s(industrial, bs="fs", k=6) + s(industrial, lfa, bs = "fs", k=6) +
+    s(energy, bs="fs", k=6) + s(energy, lfa, bs = "fs", k=6),
+  disc ~ 1 + (1|i|item)
+)
+
+fit1 <- brm( 
+  formula = formula,
+  data = d,
+  family = cumulative(link = "logit"),
+  prior = prior,
+  cores = 8,
+  iter = 1000,
+  warmup = 500,
+  refresh = 100,
+  file = "../results/131-2pl-spline-lfa.rds"
+)
+toc()
+```
+
+```{r}
+prior_summary(fit1)
+```
+
+```{r}
+summary(fit1)
+```
+
+Extract diagnostic quantities:
+
+```{r}
+np <- nuts_params(fit1)
+sum(subset(np, Parameter == "divergent__")$Value)
+```
+
+# Interpretation
+
+## Easiness and discrimination
+
+```{r}
+# extract item and easiness parameters
+ranef1 <- ranef(fit1)
+# discriminations
+alpha <- ranef1$item[, , "disc_Intercept"] %>%
+  exp() %>% 
+    as_tibble() %>%
+    rownames_to_column()
+# item easinesses (deviations from thresholds)
+beta <- ranef1$item[, , "Intercept"] %>%
+    as_tibble() %>%
+    rownames_to_column()
+# put easinesses and discriminations together
+bind_rows(beta, alpha, .id = "nlpar") %>%
+    rename(item = "rowname") %>%
+    mutate(item = as.numeric(item)) %>%
+    mutate(nlpar = factor(nlpar, labels = c("Easiness", "Discrimination"))) %>%
+    ggplot(aes(item, Estimate, ymin = Q2.5, ymax = Q97.5)) +
+    facet_wrap("nlpar", scales = "free_x") +
+    geom_pointrange() +
+    coord_flip() +
+    labs(x = "Item Number") + 
+  scale_x_discrete( limits=1:9 )
+```
+  
+## Effect of `industrial`
+
+```{r}
+conditional_effects(fit1,  effects = c("industrial:lfa"), prob = 0.8,
+                    dpar = "mu", method = "posterior_linpred")
+```
+
+```{r}
+x_pred <- tibble( industrial = rep(seq(0, 100, by=10), length(unique(d$lfa))), 
+                  energy = 0,
+                  lfa = rep(droplevels(sort(unique(d$lfa))), each=11))
+y_pred <- fitted( fit1, 
+                  newdata = x_pred,
+                  scale = c("response"),
+                  re_formula = NA,
+                  probs = c(0.25, 0.75)) 
+pred_df <- cbind.data.frame( y_pred, x_pred )
+
+gr.1 <- 
+  ggplot( pred_df ) + 
+  geom_line( aes( x = industrial, y = `Estimate.P(Y = 0)`, color = "low") ) +
+  geom_ribbon( aes( x = industrial, ymin = `Q25.P(Y = 0)`, ymax = `Q75.P(Y = 0)` ), alpha=0.1) +
+  geom_line( aes( x = industrial, y = `Estimate.P(Y = 1)`, color = "mid") ) +
+  geom_ribbon( aes( x = industrial, ymin = `Q25.P(Y = 1)`, ymax = `Q75.P(Y = 1)` ), alpha=0.2) +
+  geom_line( aes( x = industrial, y = `Estimate.P(Y = 2)`, color = "high") ) +
+  geom_ribbon( aes( x = industrial, ymin = `Q25.P(Y = 2)`, ymax = `Q75.P(Y = 2)` ), alpha=0.3) +
+  geom_line( aes( x = industrial, y = `Estimate.P(Y = 3)`, color = "very high") ) +
+  geom_ribbon( aes( x = industrial, ymin = `Q25.P(Y = 3)`, ymax = `Q75.P(Y = 3)` ), alpha=0.4) +
+  facet_wrap( ~ lfa) +
+  ylab("Probability") +
+  scale_x_discrete("Industrial", limits = seq(0,100,10)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  theme(legend.position="bottom") +
+  guides(color=guide_legend(title="")) 
+gr.1
+```
+
+## Effect of `energy`
+
+
+```{r}
+conditional_effects(fit1,  effects = c("energy:lfa"), prob = 0.8,
+                    dpar = "mu", method = "posterior_linpred")
+```
+
+```{r}
+x_pred <- tibble( energy = rep(seq(0, 100, by=10), length(unique(d$lfa))),
+                  industrial = 0,
+                  lfa = rep(droplevels(sort(unique(d$lfa))), each=11))
+y_pred <- fitted( fit1, 
+                  newdata = x_pred,
+                  scale = c("response"),
+                  re_formula = NA,
+                  probs = c(0.25, 0.75)) 
+pred_df <- cbind.data.frame( y_pred, x_pred )
+
+gr.2 <- 
+  ggplot( pred_df ) + 
+  geom_line( aes( x = energy, y = `Estimate.P(Y = 0)`, color = "low") ) +
+  geom_ribbon( aes( x = energy, ymin = `Q25.P(Y = 0)`, ymax = `Q75.P(Y = 0)` ), alpha=0.1) +
+  geom_line( aes( x = energy, y = `Estimate.P(Y = 1)`, color = "mid") ) +
+  geom_ribbon( aes( x = energy, ymin = `Q25.P(Y = 1)`, ymax = `Q75.P(Y = 1)` ), alpha=0.2) +
+  geom_line( aes( x = energy, y = `Estimate.P(Y = 2)`, color = "high") ) +
+  geom_ribbon( aes( x = energy, ymin = `Q25.P(Y = 2)`, ymax = `Q75.P(Y = 2)` ), alpha=0.3) +
+  geom_line( aes( x = energy, y = `Estimate.P(Y = 3)`, color = "very high") ) +
+  geom_ribbon( aes( x = energy, ymin = `Q25.P(Y = 3)`, ymax = `Q75.P(Y = 3)` ), alpha=0.4) +
+  facet_wrap( ~ lfa) +
+  ylab("Probability") +
+  scale_x_discrete("Industrial", limits = seq(0,100,10)) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  theme(legend.position="bottom") +
+  guides(color=guide_legend(title="")) 
+gr.2
+```
+
+```{r}
+knitr::knit_exit()
+```
