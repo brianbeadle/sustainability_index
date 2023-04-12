@@ -1,0 +1,7 @@
+
+. di "The log for the do file ${scriptname}.do is in separate log files for each country, ${scriptname}DEU.log, ${scriptn
+> ame}FRA.log, ect."
+The log for the do file 010-asci_fadn.do is in separate log files for each country, 010-asci_fadnDEU.log, 010-asci_fadnFR
+> A.log, ect.
+
+. qui log off
