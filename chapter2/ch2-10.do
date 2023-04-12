@@ -21,9 +21,11 @@ clear matrix
 
 set linesize 120   // portrait: 100 landscape: 151
 
+*cd C:/asci/stata  // BB office directory
+
 **********************************
 * global file paths for all users
-global path_raw "C:/asci/stata/raw"  // BB raw (laptop) 
+global path_raw "C:/asci/stata/raw"  // BB raw 
 global path_dat "C:/asci/stata/dat"  // BB dat
 *global path_raw "~/Documents/Uni/Projekte/sustainability-index/raw" // CW raw
 *global path_dat "~/Documents/Uni/Projekte/sustainability-index/dat" // CW dat
@@ -32,7 +34,7 @@ global path_dat "C:/asci/stata/dat"  // BB dat
 ***********************************
 
 capture program drop logfi // drop previous version of this program
-program logfi  // produce clean log file (without citing program code): 
+*program logfi  // produce clean log file (without citing program code): 
 * 					so to make the log file somewhat more an output file
 
 use dat/010-asci_fadnDEU_all.dta, clear 
@@ -99,15 +101,18 @@ di "Number of farms in Sample by Federal State (Nuts1) and Median of" _n ///
 table A1, c(freq p50 pppepawu) row format(%9.0fc)
 *qui log off
 
+********************************************************************************
 *** PROFITABILITY INDICATOR
 * profit that includes regional differences
 gen profit = SE420-(pppepawu_p50n*SE015) 
 lab var profit "profit: SE420-(pppepawu_p50n*SE015)"
 
+********************************************************************************
 *** SOLVENCY
 gen solvency = SE485/SE436  // debt-asset ratio
 lab var solvency "solvency: Debt-asset ratio (SE485/SE436)"
 
+********************************************************************************
 *** DIVERSIFICATION IN TWO STEPS AND ONE PRECEDING DATA CHECKING STEP
 /* macro for list of agricultural products. List of products included:
 	SE140 = cereals 
@@ -143,40 +148,65 @@ di "ASSESSMENT OF THE ECONOMIC DIVERSITY INDICATOR" _n ///
 describe `products'
 *qui log off
 
-egen SE131_s = rowtotal(`products')   // self-computed total output aggregated accross all categories (including energy crops and other output)
+* self-computed total output aggregated across all categories 
+* 	(including energy crops and other output)
+egen SE131_s = rowtotal(`products') 
 
 * economic diversity as a continuous variable 
 local products_p =""
 foreach vvv in `products' {
-	qui gen `vvv'_p = `vvv'/SE131_s  // share of each product in total output; using the SE131_s should eliminate outliers since we are no longer using the reported SE131
-	local products_p  `products_p'  `vvv'_p  // generate string with varnames with suffix _p
+	qui gen `vvv'_p = `vvv'/SE131_s
+	local products_p  `products_p'  `vvv'_p // generate string with varnames 
 }
 
-egen e_diverse_annual = rowmax(`products_p')     // annual share in total output of the product with the largest share
+* annual share in total output of the product with the largest share
+egen e_diverse_annual = rowmax(`products_p') 
 tsset idn YEAR, yearly
-gen e_diverse = (L1.e_diverse_annual+e_diverse_annual+F1.e_diverse_annual)/3  // moving average
-replace e_diverse = e_diverse_annual if e_diverse == .  // replacing moving average with single value if missing
 
-lab var e_diverse "Specialization: maximum share of a single product in total output"
-recode e_diverse   (min / 0 = 1 "<=0%")      (0 / 1 = 2  "0-100%") (1 / 1.1 =3 "100-110%") (1.1/ 2 =4 "110-200%") (2/ max =5 ">200%"),gen(e_diverse_d)
-recode e_diverse (min / .33 = 1 "<=33%") (.33 / .66 = 2  "33-66%") (.66 / 1 =3 "66-100%")  (1/ max =4 ">100%"),gen(e_diverse_cl)
-label var e_diverse_d "Specialization (maximum share of a single product in total output), grouped"
-label var e_diverse_cl "e_diverse-class (=Specialization=maximum share of a single product in total output), grouped"
+* as moving 3-year average: if missing, replaces with a single year value
+gen e_diverse = (L1.e_diverse_annual+e_diverse_annual+F1.e_diverse_annual)/3 
+replace e_diverse = e_diverse_annual if e_diverse == . 
+
+lab var e_diverse ///
+"Specialization: maximum share of a single product in total output"
+
+recode e_diverse (min / 0 = 1 "<=0%") (0 / 1 = 2  "0-100%") ///
+	(1 / 1.1 =3 "100-110%") (1.1/ 2 =4 "110-200%") (2/ max =5 ">200%"), ///
+	gen(e_diverse_d)
+	
+recode e_diverse (min / .33 = 1 "<=33%") (.33 / .66 = 2  "33-66%") ///
+	(.66 / 1 =3 "66-100%")  (1/ max =4 ">100%"), gen(e_diverse_cl)
+
+	label var e_diverse_d ///
+"Specialization (maximum share of a single product in total output), grouped"
+
+label var e_diverse_cl ///
+"e_diverse-class (maximum share of a single product in total output), grouped"
 
 di _n "Specialization (=reciprocal of economic diversification)" _n
 tab e_diverse_d , missing
 tab e_diverse_cl 
 sum e_diverse, de
 
+********************************************************************************
 * PESTICIDE USE 
 gen pesticide = SE300/SE025
 lab var pesticide "pestic exp (SE300/SE025 [€/ha])"
 
-*********** EMISSIONS. references to tables and equations are from ipcc guidelines
-* n2o manure management: direct emissions using equation 10.25 with table 10.21 for emission factors 
-* Germany specific N excretion rates from https://ec.europa.eu/eurostat/documents/2393397/8259002/LiveDate_2014_Task1.pdf/e1ac8f30-3c76-4a61-b607-de99f98fc7cd 
-* Assumptions: unknown factor for fraction of manure in a management system so assume 100%; unknown type of system used on farm, so averaging emission factors for all systems
-* animal weights derived from state averages from https://www.thuenen.de/media/publikationen/landbauforschung-sonderhefte/lbf_sh324.pdf
+********************************************************************************
+/** EMISSIONS. references to tables and equations are from ipcc guidelines
+
+* n2o manure management 
+* notes:
+	direct emissions using equation 10.25 with table 10.21 for emission factors 
+	uses Germany-specific N excretion rates (see paper)  
+	nitrous emissions are converted to co2 equivalents (x298 multiplier)
+	
+	Assumptions: 
+	unknown factor for fraction of manure in a mgmt system, so assuming 100% 
+	unknown type of mgmt system, so averaging emission factors for all systems
+	animal weights derived from state averages (see paper)
+*/
 gen nex_cow = 0.48*(587/1000)*365
 gen nex_cattle = 0.33*(623.57/1000)*365
 gen nex_pigs = 0.465*(118.03/1000)*365
@@ -186,18 +216,25 @@ gen mm_n2o_cow = SE085*nex_cow*0.013737*(44/28)
 gen mm_n2o_cattle = SE090*nex_cattle*0.013737*(44/28)
 gen mm_n2o_pigs = SE100*nex_pigs*0.013737*(44/28)
 gen mm_n2o_sg = SE095*nex_sg*0.013737*(44/28)
-gen mm_n2o = (mm_n2o_cow+mm_n2o_cattle+mm_n2o_pigs+mm_n2o_sg)*298 // with c02 multiplier
+gen mm_n2o = (mm_n2o_cow+mm_n2o_cattle+mm_n2o_pigs+mm_n2o_sg)*298 
 lab var mm_n2o "n2o manure management livestock"
 
 drop mm_n2o_*
 summarize mm_n2o
 
-* ch4 manure management: determined by equation 10.22 and table 10.14 using the average annual temp of 10C (climate-data.org reports an average of 10.2 for Germany)
-* // IPCC gives a value of 6 for market swine and 9 for breeding swine. Type is unknown so using average of 7.5
+/* ch4 manure management 
+*  notes and assumptions: 
+	determined by equation 10.22 and table 10.14 
+	using an average annual temp of 10C; 
+		(climate-data.org reports an average of 10.2 for Germany)
+	IPCC gives a value of 6 for market swine and 9 for breeding swine; 
+		type is unknown so using average of 7.5
+	methane emissions are converted to co2 equivalents (x25 multiplier)
+*/
 gen mm_ch4_cow = (21*SE085)/10^6
 gen mm_ch4_cattle = (1*SE090)/10^6
 gen mm_ch4_pigs = (7.5*SE100)/10^6 
-gen mm_ch4 = (mm_ch4_cow+mm_ch4_cattle+mm_ch4_pigs)*25 // w/multiplier
+gen mm_ch4 = (mm_ch4_cow+mm_ch4_cattle+mm_ch4_pigs)*25 
 lab var mm_ch4 "lvst ch4 manure management" 
 drop mm_ch4_*
 summarize mm_ch4
@@ -207,24 +244,33 @@ gen enteric_cow = (117*SE085)/10^6
 gen enteric_cattle = (57*SE090)/10^6
 gen enteric_sg = (6.5*SE095)/10^6
 gen enteric_pigs = (1.5*SE100)/10^6
-gen enteric = (enteric_cow+enteric_cattle+enteric_sg+enteric_pigs)*25 // w/multiplier
+gen enteric = (enteric_cow+enteric_cattle+enteric_sg+enteric_pigs)*25 
 lab var enteric "lvst enteric ch4 emiss"
 drop enteric_*
 summarize enteric
 
-* n2o from fertilizers 
-* fertilizers = the sum of crops (in ha) multiplied by the application N(kg)/ha. Must estimate weight from cost and nitrogen content from averages
+/* n2o from fertilizers 
+* notes:
+	fertilizers = the sum of crops multiplied by the application: N(kg)/ha 
+	must estimate weight from cost and nitrogen content from averages
+*/	
+
 gen n_fert = (SE295/786)*0.46
 gen n2o_fert = (n_fert*0.0125*(44/28))*298  // w/multiplier
 lab var n2o_fert "n2o from fertilizers"
 sum n2o_fert
 
-* crop residue 
-* fresh weight yield data (tonnes/ha) are scarce so using numbers from Eurostat for Germany. These do vary by year but most years are missing so choosing the value closest to the middle of the observation period.  
-* cereals 6.69 (2010),
-* pulses and protein crops for "other field crops" 2.5 (2011)
-* a bulk of energy crop production in Germany is maize, so using that for energy crop land: 9.09 (2010)
-* no data for vegetable and flower indicator so omitting
+/* crop residues 
+* 	notes and assumptions:
+	fresh weight yield data are scarce so using numbers from Eurostat 
+	these do vary by year but most years are missing,
+	so choosing the values closest to the middle of the observation period: 
+		cereals 6.69 (2010)
+		pulses and protein crops for "other field crops" 2.5 (2011)
+		a bulk of energy crop production in Germany is maize, 
+			so using that for energy crop land: 9.09 (2010)
+		no data for vegetable and flower indicator so omitting
+*/	
 gen cereal_cr = SE035*(((6.69/1000)*1.09+0.88)*(0.006+0.22*0.009))
 gen fc_cr = SE041*(((2.5/1000)*1.13+0.85)*(0.008+0.19*0.008))
 gen energy_cr = SE042*(((9.09/1000)*1.03+0.61)*(0.006+0.22*0.007))
@@ -248,40 +294,52 @@ gen leaching = ((n2o_fert+f_prp)*0.3*0.0075)*298
 lab var leaching "n2o from leaching/runoff"
 sum leaching
 
-* CO2 from energy. data sources for value inputs: 
-* gas price data from https://www.statista.com/statistics/598020/unleaded-gasoline-prices-germany/ 
-* diesel price data from https://www.statista.com/statistics/603701/diesel-fuel-prices-germany/
-* heat fuel price data from https://www.statista.com/statistics/597546/heating-oil-price-germany/
-* energy data from http://w.astro.berkeley.edu/~wright/fuel_energy.html
-gen motor_co2 = (F62/gasoline)*(34.2*10^-5)*(18.9/10^6) // estimates liters of fuel from expenditure in fadn and converts to TJ/liter
+/* CO2 from energy. data sources for value inputs: 
+* 	notes: 
+	estimating liters/fuel from expenditure and converting to TJ/liter
+	gas, diesel, and heating fuel price data from statista
+	energy conversion data from Berkeley study (see paper)
+*/
+gen motor_co2 = (F62/gasoline)*(34.2*10^-5)*(18.9/10^6) 
 lab var motor_co2 "carbon emissions from motor fuels"
 sum motor_co2
 
-* CO2 from heating fuels. Since most heating in Germany use natural gas or oil, the values are averaged: 
-* for calorified values: (37.3 MJ/liter for oil vs 39.0 MJ/l for gas = 38.15 MJ/l)
-* for default IPCC values (21.1 and 17.5 = 19.3)
-*gen heating_co2 = (F80/heat)*(38.15*10^5)*(19.3/10^6)
-*lab var heating_co2 "carbon emissions from heating fuels"
-*sum heating_co2
-*** still needs to be fixed. The heat variable exists in the merged data set but doesn't show up here
+/* CO2 from heating fuels 
+* 	notes and assumptions:
+	natural gas or oil are predominant heating sources in Germany,
+		so these values are averaged since specific heat source isnt in fadn: 
+	for calorified values: 37.3 MJ/liter in oil & 39.0 MJ/l in gas = 38.15 MJ/l
+	for default IPCC values: 21.1 and 17.5 = 19.3
+*/
+gen heating_co2 = (F80/heat)*(38.15*10^5)*(19.3/10^6)
+lab var heating_co2 "carbon emissions from heating fuels"
+sum heating_co2
 
-* carbon stock // currently using tier 1 estimation methods from IPCC and using the gain loss method
-* note: only measured for forest and other permanent crops, as the IPCC assumes that annual crops have an insignificant impact on carbon stock
+/* carbon stock 
+* 	notes:
+	using tier 1 gain/loss method from IPCC
+	only measured for forest and other permanent crops, as the IPCC assumes 
+		that annual crops have an insignificant impact on carbon stock
+*/	
 gen forest_stock = SE075*4*0.5
-gen perm_stock = (SE054*2.1)-(SE054*63)     // ????????????????? check formulae for forest and perma inconsistent??? BB: still need to verify but this looks correct.
+gen perm_stock = (SE054*2.1)-(SE054*63)
 gen carbon_stock = forest_stock+perm_stock
 lab var forest_stock "C-stock forest"
 lab var perm_stock   "C-stock permacult"
 lab var carbon_stock "C-stock total"
 
-gen ghg_emissions_sum = mm_n2o+mm_ch4+enteric+n2o_fert+atmospheric+leaching+motor_co2+carbon_stock+residue // to do: fix and add heating_co2, check carbon stock
-*gen ghg_emissions = ghg_emissions_sum/SE131ppi  // for averages
+* aggregating all emissions estimations into one variable
+gen ghg_emissions_sum = mm_n2o+mm_ch4+enteric+n2o_fert+atmospheric ///
+	+leaching+motor_co2+carbon_stock+residue 
 gen ghg_emissions = ghg_emissions_sum/SE410  
-sum ghg_emissions, de  // there are quite a few extreme values but they do seem plausible
+sum ghg_emissions, de  
 tabstat ghg_emissions, by(TF14) stat(mean sd min max)
-lab var ghg_emissions "carbon, nitrous, and methane emissions per euro of output"
-drop mm_* enteric *_fert residue f_prp atmospheric leaching motor_co2 *_stock ghg_emissions_sum
+lab var ghg_emissions ///
+	"intensity of carbon, nitrous, and methane emissions"
+drop mm_* enteric *_fert residue f_prp atmospheric leaching ///
+	motor_co2 *_stock ghg_emissions_sum
 
+********************************************************************************
 /*** ECOLOGICAL VALUE OF LAND
 * checking data
 browse id year *_h SE025 SE030
@@ -361,31 +419,7 @@ gen land_quality = ((land_inprod*evul)+noprod)/tot_land
 lab var land_quality "Ecological value of land"
 drop land_inprod grazing luha input_sum inputs organic irrigation evul tot_land noprod
 
-/*  OLD METHOD
-* binning the land types: wooded still is SE075
-gen noprod_h = SE073+SE072    // check whether missing vals are produced. egen rowsum() is safer
-gen permanent_h = SE065+SE050+SE055
-gen field_h = SE035+SE071+SE042+SE041+SE046
-
-foreach var of varlist SE075 noprod_h permanent_h field_h {
-gen s_`var' = `var'/total_land
-gen s2_`var' = s_`var'^2
-}
-
-* The weights below are placeholders and will be replaced after the expert survey
-gen df_woods = s_SE075*0.4
-gen df_noprod = s_noprod_h*0.3
-gen df_permanent = s_permanent_h*0.2
-gen df_field = s_field_h*0.1
-
-gen df_sum = df_woods+df_noprod+df_permanent+df_field
-gen s2_sum = s2_SE075+s2_noprod_h+s2_permanent_h+s2_field_h
-gen diversity_calc = (1-s2_sum)*df_sum
-gen land_diversity = diversity_calc // for continuous variable
-lab var land_diversity "land uses carried out on farm among the $croplistlength options [share]" 
-drop total_land noprod_h permanent_h field_h diversity_calc s_* s2_* df_*
-*/
-
+********************************************************************************
 *** MEDIAN WAGE CALCULATIONS
 
 gen p_wage = SE370/SE021    // consider outlier cleaning. many values are below 2€/hour
@@ -410,6 +444,7 @@ gen prov_employ = (SE370+SE350)/SE131
 sum prov_employ
 lab var prov_employ `"Provision of employment and contract work to t output [€/€]"'
 
+********************************************************************************
 * MULTI-FACTOR PRODUCTIVITY
 
 * I.a) LAND USE COST COMPUTATION: 
@@ -455,12 +490,15 @@ gen capcost = SE380 + max((SE501-G95CV),0)*air
 drop lruv* pluv* *cost air
 *summarize productivity if yrseq==1, detail    
    
-
 *** * I want a constant value for the profit thresholds when the data are collapsed
 *** * This probably isn't the best way to do it but it seems to work well:
 *** foreach var of varlist pppepawu_*cpi {
 *** egen `var'mean = mean(`var')
 *** }
+
+********************************************************************************
+********************************************************************************
+********************************************************************************
 
 save dat/110-raw_indicators-panel.dta, replace  // for all calculated indicators with raw variables remaining 
 
@@ -479,6 +517,6 @@ codebook profit solvency e_diverse productivity pesticide ghg_emissions land_qua
 *qui log off
  
 
-end // end program logfi
+*end // end program logfi
 
-logfi  // call program logfi (this command only works if it is not in the last line of the do file, i.e. at least one cr/lf character must follow!)
+*logfi  // call program logfi (this command only works if it is not in the last line of the do file, i.e. at least one cr/lf character must follow!)
