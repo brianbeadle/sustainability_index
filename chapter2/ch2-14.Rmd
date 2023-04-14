@@ -1,0 +1,229 @@
+---
+title: |
+  | IRT model: AS index for 2013
+  | Sustainability items with 4 categories 
+  | Exploring AS scores estimated with incomplete items
+  | 3 out of 9 items missing for 50 percent of the units
+author: "Christoph Wunder"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_caption: yes
+    theme: spacelab
+    highlight: pygments
+    toc: yes
+    toc_depth: 4
+    number_sections: yes
+    toc_float:
+      smooth_scroll: no
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+# bibliography: /Users/Christoph/Documents/Uni/Literatur/lit_DB/litdb_sp.bib
+# biblio-style: apalike
+# link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment=NA, message=FALSE, warning=FALSE)
+rm(list=ls())
+library(tidyverse)
+library(haven)
+library(brms)
+library(bayesplot)
+library(ggplot2)
+theme_set(theme_bw())
+library(tictoc)
+library(sampling)
+library(shinystan)
+```
+
+We explore the estimation of the AS index using incomplete data on items. For that purpose, we compare AS scores that are estimated with incomplete data on items with the AS scores that are estimated on the complete data. The incomplete data set considers one to three missing items on 10%, 30%, and 50% of the units.  
+
+# Data
+
+The data are prepared in `/stata/cmd-cs/11-data_processing-cs.do`.
+
+* 2013 cross section data
+* We fit a model using all observations with all (9) items. This is the control model.
+
+```{r}
+d <- read_dta("../stata/dat/200-asi-ord4-2013master.dta")
+d <- rename(d, id = idn)
+d$id <- as.integer(d$id)
+d$item <- as.factor(d$item)
+# d <- d %>% filter( item == c("1", "2", "3") )
+table(d$item)
+```
+
+```{r}
+d$y <- factor( d$y+1, 
+               levels = c("1", "2", "3", "4"), 
+               labels = c("very unsustainable", "unsustainable", "sustainable", "very sustainable"),
+               ordered = TRUE ) 
+glimpse(d, width = 60)
+table(d$y)
+```
+
+
+Select subsample of data set:
+
+```{r, eval=FALSE}
+set.seed(647382)
+n <- round(length(unique(d$id))*0.05, 0)
+samplecluster <- cluster(d, clustername=c("id"), size=n, method="srswor")
+d <- getdata(d, samplecluster)
+```
+
+Select only required variables
+
+```{r}
+d <- d %>% select(id, item ,y)
+```
+
+We randomly drop 3 out of 9 items in 50% of the farms.
+
+```{r}
+# select 30% of the farms
+set.seed(134679)
+n <- round(length(unique(d$id))*0.5, 0)
+samplecluster <- cluster(d, clustername=c("id"), size=n, method="srswor")
+units2drop <- getdata(d, samplecluster)
+units2drop <- units2drop %>% select(id, item)
+units2drop <- units2drop[order(units2drop$id, units2drop$item),]
+
+# select 3 different items out of 9 items
+length(unique(units2drop$id))
+items2drop <- data.frame( id = unique(units2drop$id),
+                          dropitem1 = sample(1:9, n, replace = TRUE))
+
+for (i in 1:nrow(items2drop)) {
+  items2drop$dropitem2[i] = sample(setdiff(1:9, items2drop$dropitem1[i]), 1, replace = TRUE)
+}
+
+for (i in 1:nrow(items2drop)) {
+  items2drop$dropitem3[i] = sample(
+    setdiff(1:9, c(items2drop$dropitem1[i],items2drop$dropitem2[i])),
+            1, replace = TRUE)
+}
+
+# merge items2drop and units2drop
+d2drop <- left_join(units2drop, items2drop, by = "id")
+
+# merge d2drop with original data frame d
+d <- left_join(d, d2drop, by = c("id", "item"))
+rm(d2drop, n, samplecluster)
+
+# make data incomplete
+d$y <- ifelse( is.na(d$dropitem1), d$y,
+               ifelse( d$dropitem1 == d$item, NA,
+                       ifelse( d$dropitem2 == d$item, NA, 
+                               ifelse( d$dropitem3 == d$item, NA, d$y ))))
+
+d %>% filter(!is.na(dropitem1)) %>% arrange(id, item) %>% head(27)
+```
+
+
+```{r}
+summary(d)
+```
+
+# Fitting the model in brms
+
+```{r, message=TRUE, warning=TRUE}
+tic("fit1")
+prior <-
+  # discrimination
+  prior("normal(0, 2)", class = "Intercept", dpar = "disc") + # +             # alpha
+  prior("normal(0, 2)", class = "sd", group = "item", dpar = "disc") +    # sigma_alpha
+  # unit-specific effects 
+  prior("constant(1)", class = "sd", group = "id") +
+  # item-specific effects 
+  prior("normal(0, 2)", class = "sd", coef = "Intercept", group = "item") 
+formula <- brmsformula(
+  # y | thres(gr = item) ~ 1 + (1|id),
+  y ~ 1 +  (1|i|item) + (1|id),
+  disc ~ 1 + (1|i|item)
+)
+fit1 <- brm( 
+  formula = formula,
+  data = d,
+  family = cumulative(link = "logit"),
+  prior = prior,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  refresh = 0,
+  file = "../results/102-cs-2013-incomplete-3-50.rds"
+)
+toc()
+```
+
+```{r}
+summary(fit1)
+```
+
+Extract diagnostic quantities:
+
+```{r}
+# extract the number of divergence transitions
+np <- nuts_params(fit1)
+sum(subset(np, Parameter == "divergent__")$Value)
+```
+
+
+```{r}
+prior_summary(fit1)
+```
+
+# Extract sustainability index (farm parameters)
+
+```{r}
+df.re <- ranef(fit1) 
+dim(df.re$id) # dimension: no of units X no sum. stats (4) X no. od parameters
+df.re <- data.frame( asi = df.re$id[,1,] ) # extract mean
+dim(df.re)
+# convert row names into first column
+df.re <- tibble::rownames_to_column(df.re, "id")
+head(df.re)
+```
+
+Save sustainability indicator:
+
+```{r}
+nrow(df.re) # number of AS values: one value for each farm in each year 
+write.csv(df.re, file = "../results/102-asi-missing-3-50.csv")
+```
+
+# Compare with AS score estimated from complete data
+
+```{r}
+d.complete <- read.csv("../results/90-asi.csv", header = TRUE)
+d.complete <- d.complete %>% select( -X )
+d.complete <- d.complete[order(d.complete$id),]
+head(d.complete)
+
+d.incomplete <- read.csv("../results/102-asi-missing-3-50.csv")
+d.incomplete <- d.incomplete %>% select( -X )
+d.incomplete <- d.incomplete[order(d.complete$id),]
+head(d.incomplete)
+
+d.combine <- left_join(d.complete, d.incomplete, by = "id")
+```
+
+```{r}
+summary(lm(asi.x ~ asi.y, data = d.combine))
+```
+```{r}
+cor(d.combine$asi.x, d.combine$asi.y)
+```
+
+# Original computing environment {-}
+
+```{r}
+devtools::session_info()
+```
+
+```{r}
+knitr::knit_exit()
+```

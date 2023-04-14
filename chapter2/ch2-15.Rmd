@@ -1,0 +1,203 @@
+---
+title: |
+  | IRT model: AS index for 2013
+  | Sustainability items with 4 categories 
+  | Scale linking: East and West Germany
+author: "Christoph Wunder"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    fig_caption: yes
+    theme: spacelab
+    highlight: pygments
+    toc: yes
+    toc_depth: 4
+    number_sections: yes
+    toc_float:
+      smooth_scroll: no
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+# bibliography: /Users/Christoph/Documents/Uni/Literatur/lit_DB/litdb_sp.bib
+# biblio-style: apalike
+# link-citations: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment=NA, message=FALSE, warning=FALSE)
+library(tidyverse)
+library(haven)
+library(brms)
+library(bayesplot)
+library(ggplot2)
+theme_set(theme_bw())
+library(tictoc)
+library(sampling)
+#library(shinystan)
+```
+
+To test the argument for scale linking, we divide the data set into two parts (East Germany and West Germany) and delete one item in each part. 
+
+
+# Data
+
+The data are prepared in `stata/cmd-cs/11-data_processing-cs.do`.
+
+```{r data}
+d <- read_dta("../../stata/dat/200-asi-ord4-2013grouped.dta")
+d <- rename(d, id = idn)
+d$id <- as.integer(d$id)
+d$item <- as.factor(d$item)
+table(d$item)
+```
+Select subsample of data set:
+
+```{r subsample, eval=FALSE}
+set.seed(647382)
+n <- round(length(unique(d$id))*0.05, 0)
+samplecluster <- cluster(d, clustername=c("id"), size=n, method="srswor")
+d <- getdata(d, samplecluster)
+```
+
+Select only required variables
+
+```{r select variables}
+d <- d %>% select(id, item , y, group, NUTS2)
+```
+
+We split the data set into two parts.
+
+```{r east-west divide}
+# group == 1 is West Germany, group == 2 is East Germany
+d$region <- ifelse( d$group==1, 1, 0 )
+d$region <- factor( d$region, levels = c(0, 1), labels = c("East", "West") )
+table(d$region, useNA = "ifany")
+```
+```{r create missing items}
+d$y <- ifelse( d$region == "West" & d$item == west.item, NA,
+                   ifelse( d$region == "East" & d$item == east.item, NA, d$y ))
+```
+
+```{r recode items}
+d$y <- factor( d$y+1, 
+               levels = c("1", "2", "3", "4"), 
+               labels = c("very unsustainable", "unsustainable", "sustainable", "very sustainable"),
+               ordered = TRUE ) 
+glimpse(d, width = 60)
+table(d$y)
+```
+
+```{r}
+xtabs( ~ item + y, data=d, subset=region=="East")
+```
+
+```{r}
+xtabs( ~ item + y, data=d, subset=region=="West")
+```
+
+
+# Fitting the model in brms
+
+```{r fit, message=TRUE, warning=TRUE}
+tic("fit1")
+tic("fit1")
+prior <-
+  # discrimination
+  prior("normal(0, 2)", class = "Intercept", dpar = "disc") + # +             # alpha
+  prior("normal(0, 2)", class = "sd", group = "item", dpar = "disc") +    # sigma_alpha
+  # unit-specific effects 
+  prior("constant(1)", class = "sd", group = "id") +
+  # item-specific effects 
+  prior("normal(0, 2)", class = "sd", coef = "Intercept", group = "item") 
+formula <- brmsformula(
+  y ~ 1 +  (1|i|item) + (1|id),
+  disc ~ 1 + (1|i|item)
+)
+fit1 <- brm( 
+  formula = formula,
+  data = d,
+  family = cumulative(link = "logit"),
+  prior = prior,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  refresh = 0,
+  file = paste0("../../results/30-scale-linking/31-corr/east-", 
+                                east.item, "-west-", west.item, ".rds")
+)
+toc()
+```
+
+```{r estimation results}
+summary(fit1)
+```
+
+Extract diagnostic quantities:
+
+```{r diagnostics}
+# extract the number of divergence transitions
+np <- nuts_params(fit1)
+sum(subset(np, Parameter == "divergent__")$Value)
+```
+
+```{r}
+# launch_shinystan(fit1)
+```
+
+
+```{r priors}
+prior_summary(fit1)
+```
+
+
+# Extract sustainability index (farm parameters)
+
+```{r}
+df.re <- ranef(fit1) 
+dim(df.re$id) # dimension: no of units X no sum. stats (4) X no. od parameters
+df.re <- data.frame( asi = df.re$id[,1,] ) # extract mean
+dim(df.re)
+# convert row names into first column
+df.re <- tibble::rownames_to_column(df.re, "id")
+head(df.re)
+```
+
+Save sustainability indicator:
+
+```{r}
+nrow(df.re) # number of AS values: one value for each farm in each year 
+write.csv(df.re, file = paste0("../../results/30-scale-linking/31-corr/east-", 
+                                east.item, "-west-", west.item, ".csv"))
+```
+
+
+# Compare with AS score estimated from complete data
+
+```{r}
+d.complete <- read.csv("../../results/90-asi.csv", header = TRUE)
+d.complete <- d.complete %>% select( -X )
+d.complete <- d.complete[order(d.complete$id),]
+head(d.complete)
+
+d.incomplete <- read.csv(paste0("../../results/30-scale-linking/31-corr/east-", 
+                                east.item, "-west-", west.item, ".csv"))
+d.incomplete <- d.incomplete %>% select( -X )
+d.incomplete <- d.incomplete[order(d.complete$id),]
+head(d.incomplete)
+
+d.combine <- left_join(d.complete, d.incomplete, by = "id")
+```
+
+```{r}
+summary(lm(asi.x ~ asi.y, data = d.combine))
+```
+```{r}
+cor(d.combine$asi.x, d.combine$asi.y, use = "everything")
+```
+
+
+# Original computing environment {-}
+
+```{r}
+devtools::session_info()
+```
