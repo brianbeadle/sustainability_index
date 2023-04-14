@@ -3,7 +3,7 @@ This repository contains all the code I used to generate an agricultural sustain
 
 ## still under construction...
 
-## GUIDE FOR USING THE STATA FILES
+## GUIDE FOR USING THE STATA FILES IN THE PRELIMINARY ANALYSES
       1 a) make /stata your working directory: from command window type   cd ..../stata
         b) define the desired location of log file (because do files use that reference):  
            e.g.   log using log/XYZ.log (or log using log/XYZ.smcl)
@@ -17,3 +17,5 @@ This repository contains all the code I used to generate an agricultural sustain
       3 a) do step 1 a)
         b) edit /cmd/000-asci_steer.do and add command runsub(XYZ)  to the end of that file 
         c) run the steering do file: do 000-asci_steer.do
+
+## After the preliminary analysis, all files run independently after the working directory is set.
