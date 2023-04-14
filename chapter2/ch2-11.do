@@ -1,11 +1,13 @@
 ********************************************************************************
 * Code for final stats and graphs for ASI
 * Beadle
-* 10.01.23
+* 10.01.23 (modified 04.2023)
 * Tasks:
+* 	- upload results of GRM estimations (cross-sectional)
+* 	- generate descriptive statistics by farm size and type
+* 	- upload and merge results of item deletion and scale linking tests
+* 	- generate plots and tables for all tests
 * 	- create shapefiles
-* 	- merge ci results with IRM output
-* 	- compare the models with correlation coefficient
 * 	- create maps with shapefiles
 ********************************************************************************
 
@@ -14,8 +16,8 @@
 *ssc install "spmap"
 *ssc install "mif2dta"
 
-*cd C:/Users/Beadle/Documents/GitHub/agricultural_sustainability/stata  // office
-cd C:/asci/git/agricultural_sustainability/stata  // laptop
+cd C:/Users/Beadle/Documents/GitHub/agricultural_sustainability/stata // office
+*cd C:/asci/git/agricultural_sustainability/stata  // laptop
 
 * importing csv files of ordinal results
 import delimited results/asi-scale-linking-master.csv, clear
@@ -115,7 +117,8 @@ collabels("Mean" "SD" "Obs")
 *************************************************************************
 *results from item deletion experiments
 *************************************************************************
-cd C:/asci/git/agricultural_sustainability
+*cd C:/asci/git/agricultural_sustainability  // laptop
+cd C:/Users/Beadle/Documents/GitHub/agricultural_sustainability // office
 
 *** import files, renaming variables, saving as .dat files
 import delimited results/94-asi-missing-1-10.csv, clear
@@ -692,7 +695,8 @@ graph export stata/results/linking96.pdf, as(pdf) replace
 *************************************
 * nuts 2 maps and scale linking tests
 *************************************
-cd C:/asci/git/agricultural_sustainability/stata  // laptop
+*cd C:/asci/git/agricultural_sustainability/stata  // laptop
+cd C:/Users/Beadle/Documents/GitHub/agricultural_sustainability/stata // office
 
 *** import csv files
 import delimited raw/scale-linking-nuts2.csv, clear
@@ -798,7 +802,6 @@ grc1leg results/prob4_linking-67.gph results/prob4_linking-68.gph ///
 	legendfrom(results/prob4_linking-67.gph) position(9) col(3)
 graph export results/prob_linking-combine6.pdf, as(pdf) replace
 
-sdfg
 gen prob_diff = 0
 replace prob_diff = 1 if prob4_linking < prob95_l | prob4_linking > prob95_u
 
@@ -823,9 +826,6 @@ browse NUTS2 missing prob* if prob_diff == 1
 *graph hbox prob_diff, over(NUTS2)
 
 *** from here: look at differences (prob_diff) by each region
-
-
-
 
 * this section saves the main pred probs as a tex file
 *ssc install texsave
