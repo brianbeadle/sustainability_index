@@ -8,7 +8,7 @@ Date: developed from 2020 - 2023 <br>
 Data source: FADN (observation period = 2004 - 2013, focus region = Germany) and other secondary sources <br>
 Programs: R (version 3.6.3) and Stata (versions 14 and 17) <br>
 <br>
-# main tasks: 
+## main tasks: 
      1 import and clean all data
      2 generate continuous variables for measuring farm sustainability
      3 transform variables into 4-category ordinal items
@@ -33,4 +33,4 @@ Programs: R (version 3.6.3) and Stata (versions 14 and 17) <br>
         b) edit /cmd/000-asci_steer.do and add command runsub(XYZ)  to the end of that file 
         c) run the steering do file: do 000-asci_steer.do
 
-## after the preliminary analysis, all files run independently after the working directory is set.
+## after the preliminary analysis (i.e. chapters 2-4), all files run independently
