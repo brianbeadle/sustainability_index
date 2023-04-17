@@ -1,12 +1,14 @@
 # sustainability_index
 This repository contains all the code I used to generate an agricultural sustainability index using item response theory.
 
+## still under construction...
+
 Authors: Brian Beadle, Stephan Brosig, Christoph Wunder <br>
 Date: developed from 2020 - 2023 <br>
 Data source: FADN (observation period = 2004 - 2013, focus region = Germany) and other secondary sources <br>
 Programs: R (version 3.6.3) and Stata (versions 14 and 17) <br>
 <br>
-Main tasks:
+# main tasks: 
      1 import and clean all data
      2 generate continuous variables for measuring farm sustainability
      3 transform variables into 4-category ordinal items
@@ -15,8 +17,6 @@ Main tasks:
      6 apply model to two topics: sustainability of non-food crop production, 
            and sustainability differences between conventional and organic farms
      7 generate all tables and graphs for thesis
-
-## still under construction...
 
 ## guide for using stata files in preliminary analysis
       1 a) make /stata your working directory: from command window type   cd ..../stata
