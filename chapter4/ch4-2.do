@@ -1,4 +1,10 @@
-* recode this to measure from the first point of transitioning (A32==3)
+********************************************************************************
+* code for paper 3: AS and the conversion to organic production
+* author: Brian Beadle
+* date: Nov 2022 to March 2023
+* NOTE: line 37 is adjusted an reran multiple times to test 
+* 	robustness against different minimum obs per farm in the DiD model
+********************************************************************************
 
 * Brian's directories
 *cd C:/asci/git/paper3-organic_farming/stata  // laptop
@@ -37,7 +43,7 @@ capture drop zasi4
 egen zasi4 = std(asi4)
 lab var zasi4 "{&theta}{&prime}"
 
-bysort idn (YEAR): gen year = _n  // generic year var to remove gaps
+bysort idn (YEAR): gen year = _n  // generic year var to remove gaps in YEAR
 gen org1 = .                  // just to reorder organic var
 replace org1 = 1 if A32 == 1  // conventional
 replace org1 = 2 if A32 == 3  // partial/transitioning
@@ -120,43 +126,6 @@ replace org = 4 if all_org == 1
 lab define orgcat 1 "AC" 2 "pre-S" 3 "post-S" 4 "AO" 
 lab value org orgcat
 
-*************************************************
-* preliminary analysis
-* testing org/conv on individual continuous vars
-*************************************************
-
-* checking for changes in the control variables for the switch group
-sort idn YEAR
-by idn (TF8), sort: gen changed1 = (TF8[1] != TF8[_N])
-by idn (A26), sort: gen changed2 = (A26[1] != A26[_N])
-
-sort idn YEAR
-list idn YEAR org TF8 A26 changed* ///
-if switch == 1 & (changed1 == 1 | changed2 == 1)
-
-distinct idn if switch == 1 & changed1 == 1
-
-ttest A26 if switch == 1, by(switch2)
-
-xtreg A26 i.switch2, fe
-
-* labeling continuous vars
-lab var profit "Prof"
-lab var solvency "Solv"
-lab var e_diverse "ED"
-lab var pesticide "EP"
-lab var ghg_emissions "GHG"
-lab var land_quality "LEQ"
-lab var paid_wage "WR"
-lab var prov_employ "PE"
-lab var productivity "MFP"
-
-lab define sizecat 6 "25,000 - <50,000" 7 "50,000 - <100,000"  ///
-	8 "100,000 - <250,000" 9 "250,000 - <500,000" 10 "500,000 - <750,000"  ///
-	11 "750,000 - <1,000,000" 12 "1,000,000 - <1,500,000"  ///
-	13 "1,500,000 - <3,000,000" 14 ">= 3,000,000"
-lab value A26 sizecat
-
 *******************************
 * descriptive stats and visuals
 *******************************
@@ -185,10 +154,11 @@ replace eurostat_org = 5.76 if YEAR == 2012
 replace eurostat_org = 6.04 if YEAR == 2013 
 lab var eurostat_org "% UAA organic: actual"
 
-tsset idn YEAR  
+tsset idn YEAR  // using actual year instead of generic time values
 tsline organicUAA eurostat_org, ///
 yscale(range(0 6)) ylabel(0(0.5)6) ///
-lcolor(black black) lpattern(solid dash) xtitle("Year") ytitle("% of total UAA") legend(pos(6) rows(1))
+lcolor(black black) lpattern(solid dash) xtitle("Year") ///
+ytitle("% of total UAA") legend(pos(6) rows(1))
 graph export results/organicuaa_test.pdf, as(pdf) replace
 
 tsset idn year
@@ -310,7 +280,7 @@ esttab event2 using results/event2-5.tex, replace  ///
 b(3) ci(3) label star(* 0.10 ** 0.05 *** 0.01) ///
 booktabs alignment(D{.}{.}{-1})  ///
 collabels("ATT") 
-fgh
+
 graph combine results/csdid_plot_ac5.gph results/csdid_plot_ac6.gph  ///
 	results/csdid_plot_ac7.gph results/csdid_plot_ac8.gph  ///
 	results/csdid_plot_ac9.gph results/csdid_plot_ac10.gph,  ///
