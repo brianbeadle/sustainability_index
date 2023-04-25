@@ -3,14 +3,14 @@
 * Beadle
 * 25.03.2022; updated 07.2022
 * Notes:
-* 	- Uses the 4-category GRM (asi4)
-* 	- Will use 2013 data (cross-sectional)
+* 	- Uses the cross-sectional (2013) 4-category GRM (asi4)
 * 	- Note: LFA variable is important!
 *		- A lot of literature suggests using marginal land for NFCs
 *		- LFA = less favored area
 ********************************************************************************
 
-cd C:/asci/git/nfc-asi/stata
+*cd C:/asci/git/nfc-asi/stata // laptop
+cd C:/Users/Beadle/Documents/GitHub/nfc-asi/stata // office
 
 ********************************************************************************
 * importing and merging data
